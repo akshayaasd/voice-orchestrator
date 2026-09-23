@@ -1,8 +1,6 @@
 # voice-orchestrator
 
-The core engine behind a multi-tenant Voice AI platform for inbound telephony — built for Indian healthcare clinics, salons, and legal firms. It handles the full pipeline from a caller's voice to a confirmed appointment booking, end to end.
-
-Built by **Akshayaa** (response & delivery) and **Keerthana** (input & understanding) as part of the Credang Voice AI project.
+The core engine for a multi-tenant Voice AI platform built for inbound telephony. Handles the full pipeline from a caller's voice to a confirmed appointment booking — designed for healthcare clinics, salons, and legal firms operating in India and globally.
 
 ---
 
@@ -10,27 +8,27 @@ Built by **Akshayaa** (response & delivery) and **Keerthana** (input & understan
 
 When someone calls a business number:
 
-1. The PSTN call arrives via Exotel → LiveKit SIP Gateway
+1. The PSTN call arrives via a SIP trunk → LiveKit SIP Gateway
 2. The caller's audio is streamed to Deepgram (English) or Sarvam Saaras (Hindi/Tamil/etc.) for transcription
 3. Silero VAD watches for barge-in — if the caller interrupts, TTS stops immediately
 4. The transcript goes to an LLM (Groq / Gemini / Ollama) with a vertical-specific system prompt
-5. The LLM either talks back or calls a tool (search slots, hold a slot, confirm booking, cancel)
-6. Tool results go through the `UnifiedAppointmentAdapter` — a single interface that works with any booking backend
+5. The LLM either responds or calls a tool (search slots, hold a slot, confirm booking, cancel)
+6. Tool calls go through the `UnifiedAppointmentAdapter` — a single interface that works with any booking backend
 7. The AI's response is streamed word-by-word to Sarvam Bulbul for voice synthesis
 8. Audio bytes are piped back to the caller via LiveKit WebSockets
 9. On booking confirmation, an SMS goes out to the caller via Exotel
 
-The whole round-trip targets **< 600ms** (P95 < 800ms).
+The whole round-trip targets **< 600ms** end-to-end (P95 < 800ms).
 
 ---
 
-## Verticals supported out of the box
+## Verticals supported
 
 | Vertical | AI Persona | Key behaviours |
 |:---|:---|:---|
-| **Healthcare** | Sarah — medical receptionist | DOB verification, emergency 911 redirect, no medical advice |
-| **Salon** | Aria — beauty booking | Service/stylist matching, cancellation policy |
-| **Legal** | Alex — intake assistant | Conflict-of-interest screening, urgent matter flagging, no legal advice |
+| **Healthcare** | Medical receptionist | DOB verification, emergency 911 redirect, no medical advice |
+| **Salon** | Beauty booking assistant | Service/stylist matching, cancellation policy |
+| **Legal** | Intake assistant | Conflict-of-interest screening, urgent matter flagging, no legal advice |
 
 ---
 
@@ -39,12 +37,12 @@ The whole round-trip targets **< 600ms** (P95 < 800ms).
 | Layer | Technology |
 |:---|:---|
 | Telephony ingest | LiveKit SIP Gateway + Exotel (India) / Twilio (Global) |
-| STT | Deepgram Nova-2 (English) · Sarvam Saaras (Indic) |
-| VAD | Silero VAD (ONNX, 40ms window) |
+| Speech-to-Text | Deepgram Nova-2 (English) · Sarvam Saaras (Indic) |
+| Voice Activity Detection | Silero VAD (ONNX, 40ms window) |
 | LLM | Groq Llama 3.3 70B · Gemini 1.5 Flash · Ollama (local dev) |
-| TTS | Sarvam Bulbul (Indic) |
+| Text-to-Speech | Sarvam Bulbul |
 | Audio egress | LiveKit WebSockets + jitter buffer |
-| Slot locking | Redis `SET NX` 2-phase lock (prevents double-booking) |
+| Slot locking | Redis `SET NX` 2-phase lock |
 | SMS | Exotel REST API |
 | Language | TypeScript (Node.js) |
 
@@ -59,10 +57,10 @@ src/
 │
 ├── orchestrator/
 │   ├── stateMachine.ts               8-state call FSM (IDLE → TERMINATED)
-│   └── responseGenerator.ts          Streams LLM tokens to TTS, runs tool calls
+│   └── responseGenerator.ts          Streams LLM tokens to TTS, executes tool calls
 │
 ├── adapters/
-│   ├── UnifiedAppointmentAdapter.ts  The booking interface every client must implement
+│   ├── UnifiedAppointmentAdapter.ts  Booking interface every client integration must implement
 │   └── MockAppointmentAdapter.ts     In-memory mock for local development
 │
 ├── llm/
@@ -86,7 +84,7 @@ src/
 │   └── sarvamProvider.ts             Sarvam Bulbul WebSocket streaming
 │
 ├── vad/
-│   └── vadHandler.ts                 Silero probability → speech_start / barge_in events
+│   └── vadHandler.ts                 Silero probability scores → barge-in events
 │
 ├── redis/
 │   └── slotLockManager.ts            2-phase atomic slot lock + call session state
@@ -122,15 +120,15 @@ cp .env.example .env
 Open `.env` and fill in your keys. At minimum, pick one LLM provider:
 
 ```env
-# Pick one — Groq is fastest
+# Pick one — Groq is the fastest
 GROQ_API_KEY=your_key_here
 
-# STT — pick one
+# STT — pick based on language
 DEEPGRAM_API_KEY=your_key_here   # English
-SARVAM_API_KEY=your_key_here     # Indic languages (also used for TTS)
+SARVAM_API_KEY=your_key_here     # Indic languages (also covers TTS)
 ```
 
-The app auto-selects the LLM in order: **Groq → Gemini → Ollama**. If none are set, it falls back to Ollama (requires Ollama running locally).
+The app auto-selects the LLM in priority order: **Groq → Gemini → Ollama**. If none are configured, it falls back to Ollama (requires Ollama running locally).
 
 ### 3. Run in development
 
@@ -138,105 +136,108 @@ The app auto-selects the LLM in order: **Groq → Gemini → Ollama**. If none a
 npm run dev
 ```
 
-This boots the full pipeline and runs a simulated call with a mock booking adapter — no real phone call needed. You'll see each component initialise and the FSM transitioning through states.
+Boots the full pipeline and runs a simulated call with the mock booking adapter — no real phone call or API key needed to see it working. Each component initialises and you can watch the FSM step through its states in the logs.
 
 ### 4. Build for production
 
 ```bash
-npm run build   # compiles TypeScript to dist/
-npm start       # runs the compiled output
+npm run build   # compiles TypeScript → dist/
+npm start       # runs compiled output
 ```
 
 ---
 
-## How booking works (the double-booking lock)
+## How the double-booking lock works
 
-We use a 2-phase Redis lock to make sure two callers can never grab the same slot at the same time:
+Two callers can never grab the same slot at the same time. Redis handles it atomically:
 
 ```
 Caller asks for 10:00 AM slot
         │
         ▼
-Phase 1 — Redis soft lock (120 second TTL)
-  SET slot:tenant_1:slot-1000  "LOCKED"  EX 120  NX
-  → If key already exists: slot taken — offer 10:30 AM instead
-  → If set succeeds: proceed with caller confirmation
+Phase 1 — Redis soft lock (120s TTL)
+  SET slot:{tenantId}:{slotId}  "LOCKED"  EX 120  NX
+  → Key already exists: slot taken — offer the next available time
+  → Set succeeds: proceed with caller confirmation
         │
         ▼
 Caller confirms on the phone
         │
         ▼
-Phase 2 — Hard commit to database (via UnifiedAppointmentAdapter)
-  → confirmBooking() writes to client's booking system
+Phase 2 — Hard commit
+  → confirmBooking() writes to the client's booking system
   → Redis key deleted on success
-  → SMS confirmation dispatched
+  → SMS confirmation dispatched to caller
 ```
 
 ---
 
-## Adding a new booking backend (e.g. Cliniko, Practo, Google Calendar)
+## Adding a new booking backend
 
-Implement the `UnifiedAppointmentAdapter` interface in [`src/adapters/UnifiedAppointmentAdapter.ts`](src/adapters/UnifiedAppointmentAdapter.ts):
+Implement the `UnifiedAppointmentAdapter` interface:
 
 ```typescript
-import { UnifiedAppointmentAdapter } from './UnifiedAppointmentAdapter';
+import type { UnifiedAppointmentAdapter } from './UnifiedAppointmentAdapter';
 
 export class ClinikoAdapter implements UnifiedAppointmentAdapter {
-  async searchSlots(params) { /* call Cliniko API */ }
-  async holdSlot(params)    { /* acquire Redis lock */ }
+  async searchSlots(params)    { /* call Cliniko API */ }
+  async holdSlot(params)       { /* acquire Redis lock */ }
   async confirmBooking(params) { /* POST to Cliniko + release lock */ }
-  // ...
+  async releaseHold(params)    { /* delete Redis key */ }
+  async getBookingByPhone(params) { /* lookup for reschedule/cancel */ }
+  async cancelBooking(params)  { /* cancel in Cliniko */ }
 }
 ```
 
-Then pass it into `ResponseGenerator` in `index.ts`. The LLM and the rest of the pipeline don't need to know anything changed.
+Pass the adapter into `bootstrapCallSession()` in `index.ts`. Everything else in the pipeline stays the same.
 
 ---
 
-## Adding a new vertical (e.g. restaurant, gym)
+## Adding a new vertical
 
 1. Create a system prompt in `src/llm/prompts/yourVerticalPrompt.ts`
 2. Add the vertical name to the `Vertical` type in `index.ts`
-3. Add it to the `getSystemPrompt()` switch
+3. Add a case to the `getSystemPrompt()` switch
 
-That's it — the rest of the pipeline is vertical-agnostic.
+The rest of the pipeline is vertical-agnostic.
 
 ---
 
 ## Call state machine
 
-Every call moves through these states in order:
-
 ```
 IDLE
-  └─▶ CALL_INIT              (SIP call connected)
-        └─▶ CONTEXT_AND_IDENTITY  (greeting + caller ID/DOB verification)
-              └─▶ INTENT_RECOGNITION   (booking / reschedule / FAQ / emergency)
-                    ├─▶ ACTION_NEGOTIATION    (slot search, hold, negotiate)
-                    │     └─▶ CONFIRMATION_EGRESS  (verbal confirm + hard commit + SMS)
+  └─▶ CALL_INIT                (SIP call connected)
+        └─▶ CONTEXT_AND_IDENTITY   (greeting + caller verification)
+              └─▶ INTENT_RECOGNITION    (booking / reschedule / FAQ / emergency)
+                    ├─▶ ACTION_NEGOTIATION     (slot search, hold, negotiate)
+                    │     └─▶ CONFIRMATION_EGRESS   (verbal confirm + commit + SMS)
                     │           └─▶ WRAP_UP → TERMINATED
-                    └─▶ ESCALATION   (SIP REFER to live human agent)
+                    └─▶ ESCALATION    (SIP REFER to live human agent)
                           └─▶ TERMINATED
 ```
 
 ---
 
-## Cost targets (from architecture spec)
+## Latency budget
 
-| Stack | Cost per minute | Use case |
-|:---|:---|:---|
-| Tier 2 — India Hybrid | ₹2.30 / min | Production launch (Exotel + Sarvam + Groq) |
-| Tier 3 — Ultra Budget | ₹0.83 / min | Scale phase (self-hosted Whisper + Kokoro TTS) |
-| Vapi / Retell / Bland | ₹8–14 / min | What we're replacing |
-
-At 10,000 calls/month, Tier 2 costs **₹57,500** vs **₹287,500** on Vapi — a saving of ₹2.76 lakh/month.
+| Step | Target |
+|:---|:---|
+| PSTN → media ingest | 30–50ms |
+| Silero VAD | 40–60ms |
+| STT first transcript | 100–140ms |
+| Redis lock check | 20–40ms |
+| LLM time-to-first-token | 120–180ms |
+| TTS first audio chunk | 90–130ms |
+| Egress buffer sync | 30–50ms |
+| **Total end-to-end** | **430–650ms** |
 
 ---
 
-## Work split
+## Cost reference
 
-| Owner | Modules |
+| Stack | Cost per minute |
 |:---|:---|
-| **Keerthana** | `telephony/`, `stt/`, `vad/`, `redis/` |
-| **Akshayaa** | `orchestrator/`, `llm/`, `tts/`, `egress/`, `sms/` |
-| **Both** | `adapters/`, `index.ts`, integration testing |
+| Tier 2 — India Hybrid (Exotel + Sarvam + Groq) | ₹2.30 / min |
+| Tier 3 — Ultra Budget (self-hosted Whisper + Kokoro TTS) | ₹0.83 / min |
+| Managed platforms (Vapi / Retell / Bland) | ₹8–14 / min |
