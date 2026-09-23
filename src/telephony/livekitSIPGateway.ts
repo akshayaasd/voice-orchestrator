@@ -96,10 +96,10 @@ export class LiveKitSIPGateway extends EventEmitter implements TelephonyProvider
     console.log(`[LiveKitSIP] SIP REFER transfer: ${callSid} → ${destinationSipUri}`);
     // LiveKit SIP REFER is dispatched via the SIP client
     // Full implementation requires a SIP dispatch rule to the target URI
-    await this.sipClient.createSipOutboundTrunk({
-      name:    `transfer-${callSid}`,
-      address: destinationSipUri,
-      numbers: [],
-    });
+    await this.sipClient.createSipOutboundTrunk(
+      `transfer-${callSid}`,
+      destinationSipUri,
+      [],
+    );
   }
 }

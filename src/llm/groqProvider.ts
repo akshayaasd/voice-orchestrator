@@ -26,10 +26,19 @@ export class GroqProvider implements LLMProvider {
   async *generateStream(history: Message[], systemPrompt: string): AsyncIterable<LLMResponseChunk> {
     const messages: Groq.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
-      ...history.map((m) => ({
-        role:    m.role as 'user' | 'assistant' | 'system' | 'tool',
-        content: m.content,
-      })),
+      ...history.map((m) => {
+        if (m.role === 'tool') {
+          return {
+            role:         'tool' as const,
+            content:      m.content,
+            tool_call_id: 'tool-result', // placeholder — real ID from prior tool_call
+          };
+        }
+        return {
+          role:    m.role as 'user' | 'assistant' | 'system',
+          content: m.content,
+        };
+      }),
     ];
 
     // Accumulate tool call delta chunks (Groq streams tool calls incrementally)
