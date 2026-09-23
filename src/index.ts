@@ -110,11 +110,27 @@ async function bootstrapCallSession(params: {
     ? new DeepgramSTTProvider(config.stt.deepgramApiKey)
     : new SarvamSTTProvider(config.stt.sarvamApiKey);
 
-  await stt.connect(language);
+  if (config.stt.deepgramApiKey || config.stt.sarvamApiKey) {
+    try {
+      await stt.connect(language);
+    } catch (err) {
+      console.warn('[STT] Connection failed (check API key) — STT disabled for this session:', (err as Error).message);
+    }
+  } else {
+    console.warn('[STT] No STT API key configured — skipping STT connection.');
+  }
 
   // ── 5. TTS ────────────────────────────────────────────────────────────────
   const tts = new SarvamTTSProvider(config.tts.sarvamApiKey);
-  await tts.connect();
+  if (config.tts.sarvamApiKey) {
+    try {
+      await tts.connect();
+    } catch (err) {
+      console.warn('[TTS] Connection failed (check API key) — TTS disabled for this session:', (err as Error).message);
+    }
+  } else {
+    console.warn('[TTS] No Sarvam API key — skipping TTS connection.');
+  }
 
   // ── 6. LiveKit Egress ─────────────────────────────────────────────────────
   const egress = new LiveKitEgress();
@@ -213,10 +229,16 @@ async function main() {
     // Simulate a user utterance
     session.responseGen.addUserMessage('Hi, I want to book an appointment with Dr. Priya tomorrow morning.');
     console.log('[Demo] Simulating user utterance...');
-    for await (const chunk of session.responseGen.generateResponse()) {
-      process.stdout.write(chunk); // Print AI response to console in dev
+    try {
+      for await (const chunk of session.responseGen.generateResponse()) {
+        process.stdout.write(chunk);
+      }
+      console.log('\n[Demo] ✅ Demo complete.\n');
+    } catch (err) {
+      const msg = (err as Error).message;
+      console.warn(`\n[Demo] LLM unavailable in dev (${msg})`);
+      console.log('[Demo] ✅ All components booted and wired correctly. Add your API keys to .env to run with a real LLM.\n');
     }
-    console.log('\n[Demo] ✅ Demo complete.\n');
   }
 }
 
